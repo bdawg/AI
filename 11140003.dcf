@@ -1,0 +1,13 @@
+// SmartDriver Configuration File (XXXX.dcf) 
+
+///////////////////////////////////////////////////////
+//START: FACTORY DEFINED SETTINGS -- DO NOT MODIFY
+///////////////////////////////////////////////////////
+[DT:3]
+[SN:11140003]
+[CN: 128]
+[CS: 20000000]
+//Adlink Card Number: -1 for autodetect
+[DN: 0]
+//Smart Driver Box Address - default 0
+[DA: 0]
