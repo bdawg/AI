@@ -56,9 +56,9 @@ function AIGui_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 
 %%%%%%%%%%%%%%%%%%%%%%%% Default Settings %%%%%%%%%%%%%%%%%%%%%%%%%
-defaultRemoteIP = '10.88.18.2'; %IP address of Xenics computer
-defaultRemotePort = 9091;
-defaultLocalPort = 9090;
+defaultRemoteIP = '129.78.137.229'; %IP address of Xenics computer
+defaultRemotePort = 9090;
+defaultLocalPort = 9091;
 
 xenicsType = 320; %Set to 320 or 640, accordingly.
 
@@ -88,6 +88,7 @@ vidUpdateRate = 5;     % Default frame rate to display live video (FPS).
 
 memsDefaultStepSize = 0.05;
 memsScanRange = -3:0.05:3; %TODO - enter this through GUI
+memsScanRange = -3:0.5:3; %TODO - enter this through GUI
 
 MirrorSerialNumberString = 'FSC37-02-01-0310';
 DriverSerialNumberString = '11140003';
@@ -1626,6 +1627,8 @@ function doMemsScanBtn_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 scanWait=0.1 %Time to wait after MEMS move to send acq command
+dataBytes = 8*8; %8 values, doubles
+timeout=5; %Timeout to wait for data (s)
 
 segNums = getappdata(handles.AIGui,'segNums');
 memsHandle=getappdata(handles.AIGui,'memsHandle');
@@ -1645,9 +1648,13 @@ remotePort = str2double(get(handles.remotePortBox,'String'));
 localPort = str2double(get(handles.localPortBox,'String'));
 udpXenics = udp(remoteIP, remotePort, 'LocalPort', localPort);
 udpXenics.Terminator='';
+udpXenics.InputBufferSize = dataBytes;
 fopen(udpXenics);
 
-for ss = 1:length(segInds)
+allPhotomValues=zeros(nPosns,nPosns,8);
+
+%for ss = 1:length(segInds)
+for ss = 7:7
     seg = segInds(ss);
     for xx = 1:nPosns
         for yy = 1:nPosns
@@ -1660,6 +1667,20 @@ for ss = 1:length(segInds)
             
             pause(scanWait)
             fprintf(udpXenics,'acq');
+            
+            % Now wait for a response, with a timeout
+            tic
+            %err=0;
+            while udpXenics.BytesAvailable ~= dataBytes
+                pause(0.001)
+                if toc > timeout
+                    %err=1;
+                    errordlg('No data received before timeout!','Timeout')
+                    break
+                end
+            end
+            data=fread(udpXenics,dataBytes,'double');
+            allPhotomValues(xx,yy,:)=data;
         end
         disp(['X position ' num2str(xx) ' of ' num2str(nPosns)])
     end
