@@ -22,7 +22,7 @@ function varargout = AIGui(varargin)
 
 % Edit the above text to modify the response to help AIGui
 
-% Last Modified by GUIDE v2.5 22-Jul-2015 08:39:10
+% Last Modified by GUIDE v2.5 14-Oct-2015 19:58:14
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -60,7 +60,7 @@ defaultRemoteIP = '129.78.137.229'; %IP address of Xenics computer
 defaultRemotePort = 9090;
 defaultLocalPort = 9091;
 
-xenicsType = 320; %Set to 320 or 640, accordingly.
+xenicsType = 640; %Set to 320 or 640, accordingly.
 
 expTime = 0.001;     % Exposure time
 emGain = 0;          % EM gain
@@ -89,6 +89,7 @@ vidUpdateRate = 5;     % Default frame rate to display live video (FPS).
 memsDefaultStepSize = 0.05;
 memsScanRange = -3:0.05:3; %TODO - enter this through GUI
 memsScanRange = -3:0.5:3; %TODO - enter this through GUI
+%memsScanRange = -3:1:3
 
 MirrorSerialNumberString = 'FSC37-02-01-0310';
 DriverSerialNumberString = '11140003';
@@ -119,6 +120,7 @@ bY = 17.8877;
 
 hardLims = [ [-3, 3] ; [-3, 3] ]; %MEMS will not move past this in loop
 segNums = [30, 27, 25, 23, 21, 37, 35, 17]; %Segment numbers
+photomSegNums = [35 37 21 17 23 30 25 27]; %Segments correspodnign to photometric taps
 winSize = 24; %Size of subwindow for COG measurement
 winCentFilename = 'winCents.mat';
 bgRegion = [ 55,75 ; 55, 75]; %row;col
@@ -156,6 +158,7 @@ setappdata(handles.AIGui,'memsWfsCoeffs',[mX bX mY bY])
 setappdata(handles.AIGui,'memsWfsRmat', ...
     [cos(memsTheta), -sin(memsTheta) ; sin(memsTheta), cos(memsTheta)])
 setappdata(handles.AIGui,'segNums',segNums)
+setappdata(handles.AIGui,'photomSegNums',photomSegNums);
 setappdata(handles.AIGui,'winSize',winSize)
 load(winCentFilename)
 setappdata(handles.AIGui,'winCents',winCents)
@@ -169,7 +172,8 @@ setappdata(handles.AIGui,'maxVal', 0.);
 setappdata(handles.AIGui,'hardLims', hardLims);
 allSubIms = zeros(winSize, winSize, nSubs);
 setappdata(handles.AIGui,'allSubIms', allSubIms);
-
+setappdata(handles.AIGui,'curAllCogX',zeros(length(segNums)));
+setappdata(handles.AIGui,'curAllCogY',zeros(length(segNums)));
 
 %%%%%%%%%%%%%%%%%%% Set GUI values %%%%%%%%%%%%%%%%%%%
 set(handles.expTimeBox,'string',num2str(expTime))
@@ -319,6 +323,18 @@ setappdata(handles.AIGui,'imwidth',imwidth);
 %auxFig = figure(1);
 %auxFig = gca;
 %setappdata(handles.AIGui,'auxFig',auxFig);
+
+% Set up UDP connection for MEMS scans
+dataBytes = 8*8; %8 values, doubles
+remoteIP = get(handles.remoteIPBox,'String');
+remotePort = str2double(get(handles.remotePortBox,'String'));
+localPort = str2double(get(handles.localPortBox,'String'));
+udpXenics = udp(remoteIP, remotePort, 'LocalPort', localPort);
+udpXenics.Terminator='';
+udpXenics.InputBufferSize = dataBytes;
+fopen(udpXenics);
+setappdata(handles.AIGui,'udpXenics',udpXenics);
+setappdata(handles.AIGui,'dataBytes',dataBytes);
 
 % Setup timers
 handles.vidTimer = timer(...
@@ -621,7 +637,7 @@ PTTPositionOn=getappdata(handles.AIGui,'PTTPositionOn');
 
 memsHandle=getappdata(handles.AIGui,'memsHandle');
 memsSegsList=getappdata(handles.AIGui,'memsSegsList');
-targetPosns=getappdata(handles.AIGui,'targetPosns');
+%targetPosns=getappdata(handles.AIGui,'targetPosns');
 segInds = memsSegsList(segNums);
 
 % Put the actual current positions into curMemsPosnX,Y
@@ -720,6 +736,7 @@ while getappdata(handles.AIGui,'runState') == 1
     pGain = getappdata(handles.AIGui,'pGain');
     iGain = getappdata(handles.AIGui,'iGain');
     dGain = getappdata(handles.AIGui,'dGain');
+    targetPosns=getappdata(handles.AIGui,'targetPosns');
     
     % Loops through subims, but can maybe do this faster with some array op
     for kk = 1:nSubs
@@ -776,6 +793,8 @@ while getappdata(handles.AIGui,'runState') == 1
         curMemsPosnY = newMemsPosnY;   
     end
      
+    setappdata(handles.AIGui,'curAllCogX',allCogX);
+    setappdata(handles.AIGui,'curAllCogY',allCogY);
     
     if getappdata(handles.AIGui,'saveDataState')
         allCogXs(:,count) = allCogX;
@@ -873,6 +892,10 @@ memsHandle = getappdata(handles.AIGui,'memsHandle');
 MirrorRelease(memsHandle)
 pause(1)
 
+udpXenics=getappdata(handles.AIGui,'udpXenics');
+fclose(udpXenics)
+delete(udpXenics)
+
 delete(handles.AIGui);
 delete(handles.valTimer)
 delete(handles.vidTimer)
@@ -950,7 +973,7 @@ for kk = 1:nSubs
         'Parent',handles.axesDetectorView,'Color','red')
 end
 
-plot(winCents(:,2),winCents(:,1),'bo','Parent',handles.axesDetectorView)
+plot(winCents(:,2),winCents(:,1),'go','Parent',handles.axesDetectorView)
 rectangle('Position',bgRect,'EdgeColor','y','Linestyle','--','Parent',handles.axesDetectorView)
 
 hold(handles.axesDetectorView,'off')
@@ -1627,35 +1650,34 @@ function doMemsScanBtn_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 scanWait=0.1 %Time to wait after MEMS move to send acq command
-dataBytes = 8*8; %8 values, doubles
 timeout=5; %Timeout to wait for data (s)
 
 segNums = getappdata(handles.AIGui,'segNums');
 memsHandle=getappdata(handles.AIGui,'memsHandle');
 memsSegsList=getappdata(handles.AIGui,'memsSegsList');
+photomSegNums=getappdata(handles.AIGui,'photomSegNums');
 targetPosns=getappdata(handles.AIGui,'targetPosns');
 segInds = memsSegsList(segNums);
 memsScanRange=getappdata(handles.AIGui,'memsScanRange');
 nPosns=length(memsScanRange);
+dataBytes=getappdata(handles.AIGui,'dataBytes');
 
 PTTPositionFlat=getappdata(handles.AIGui,'PTTPositionFlat');
 SetMirrorPosition(memsHandle, memsSegsList, PTTPositionFlat);
 MirrorSendSettings(memsHandle);
 pause(scanWait)
 
-remoteIP = get(handles.remoteIPBox,'String');
-remotePort = str2double(get(handles.remotePortBox,'String'));
-localPort = str2double(get(handles.localPortBox,'String'));
-udpXenics = udp(remoteIP, remotePort, 'LocalPort', localPort);
-udpXenics.Terminator='';
-udpXenics.InputBufferSize = dataBytes;
-fopen(udpXenics);
+udpXenics=getappdata(handles.AIGui,'udpXenics');
 
 allPhotomValues=zeros(nPosns,nPosns,8);
-
-%for ss = 1:length(segInds)
-for ss = 7:7
+allBestMemsPosns=zeros(2,8);
+for ss = 1:length(segInds)
+%for ss = 7:7
     seg = segInds(ss);
+    scanStatusString = ['Doing MEMS Scan for Seg ' num2str(seg)];
+    set(handles.scanStatusText,'String',scanStatusString);
+    set(handles.scanStatusText,'Visible','On');
+    
     for xx = 1:nPosns
         for yy = 1:nPosns
             PTTNewPosition = PTTPositionFlat;
@@ -1663,7 +1685,8 @@ for ss = 7:7
             PTTNewPosition(seg,3) = memsScanRange(yy);
             SetMirrorPosition(memsHandle, memsSegsList, PTTNewPosition);
             MirrorSendSettings(memsHandle);
-            set(handles.memsPosnTable,'Data',PTTNewPosition);
+            [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
+            set(handles.memsPosnTable,'Data',ReachablePositions);
             
             pause(scanWait)
             fprintf(udpXenics,'acq');
@@ -1680,20 +1703,51 @@ for ss = 7:7
                 end
             end
             data=fread(udpXenics,dataBytes,'double');
-            allPhotomValues(xx,yy,:)=data;
+            
+            %Which photometric tap corresponds to this segment?
+            photomInd = find(photomSegNums == seg);         
+            allPhotomValues(xx,yy,ss)=data(photomInd);
         end
         disp(['X position ' num2str(xx) ' of ' num2str(nPosns)])
     end
-    disp(['Segment ' num2str(seg)])
+    %disp(['Segment ' num2str(seg)])
+    
+    % Find the max and show the result
+    curVals = allPhotomValues(:,:,ss);
+    disp('Gauss filter in MEMS Scan ENABLED');
+    curVals=imgaussfilt(curVals,1);
+    hold(handles.axesMemsScan,'on');
+    cla
+    imagesc(memsScanRange, memsScanRange, curVals,'Parent',handles.axesMemsScan)
+    axis([memsScanRange(1) memsScanRange(end) ...
+       memsScanRange(1) memsScanRange(end)])
+    %set(handles.axesMemsScan,'XTickLabel','')
+    %set(handles.axesMemsScan,'YTickLabel','')
+    %axis tight
+    [m, maxInd] = max(curVals(:));
+    [maxIndX, maxIndY] = ind2sub(size(curVals),maxInd);
+    maxPosX=memsScanRange(maxIndX);
+    maxPosY=memsScanRange(maxIndY);
+    plot(maxPosY,maxPosX,'xr')
+    hold(handles.axesMemsScan,'off');
+    
+    allBestMemsPosns(:,ss) = [maxPosX, maxPosY];
+    
+    %Set the current MEMS position to the best one
+    PTTCurrentPosition = getappdata(handles.AIGui,'PTTCurrentPosition');
+    PTTCurrentPosition(seg,2)=maxPosX;
+    PTTCurrentPosition(seg,3)=maxPosY;
+    SetMirrorPosition(memsHandle, memsSegsList, PTTCurrentPosition);
+    MirrorSendSettings(memsHandle);
+    set(handles.memsPosnTable,'Data',PTTCurrentPosition);
+    setappdata(handles.AIGui,'PTTCurrentPosition',PTTCurrentPosition);
 end
+set(handles.scanStatusText,'Visible','Off');
 
 disp('Finished')
 
-fclose(udpXenics)
-delete(udpXenics)
-
-SetMirrorPosition(memsHandle, memsSegsList, PTTPositionFlat);
-MirrorSendSettings(memsHandle);
+% SetMirrorPosition(memsHandle, memsSegsList, PTTPositionFlat);
+% MirrorSendSettings(memsHandle);
 
 
 
@@ -1798,6 +1852,73 @@ function saveFrameFilenameBox_Callback(hObject, eventdata, handles)
 % --- Executes during object creation, after setting all properties.
 function saveFrameFilenameBox_CreateFcn(hObject, eventdata, handles)
 % hObject    handle to saveFrameFilenameBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes on button press in setCurTgtBtn.
+function setCurTgtBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to setCurTgtBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+response = questdlg('Are you sure you want to set the current positions as the new target?');
+if strcmp(response,'Yes')
+    
+    numAvs = str2double(get(handles.numAvsBox,'String'));
+    segNums = getappdata(handles.AIGui,'segNums');
+    nSegs = length(segNums);
+    avCogX=zeros(nSegs,1);
+    avCogY=zeros(nSegs,1);
+    oldAvCogX=zeros(nSegs,1);
+    oldAvCogY=zeros(nSegs,1);
+    
+    for k = 1:numAvs
+        if (getappdata(handles.AIGui,'curAllCogX') ~= oldAvCogX)...
+                & (getappdata(handles.AIGui,'curAllCogY') ~= oldAvCogY)
+            avCogX = avCogX + getappdata(handles.AIGui,'curAllCogX');
+            avCogY = avCogY + getappdata(handles.AIGui,'curAllCogY');
+        end
+        pause(0.01)
+    end
+    avCogX = avCogX/numAvs;
+    avCogY = avCogY/numAvs;
+    
+    targetPosns=[avCogX, avCogY];
+    setappdata(handles.AIGui,'targetPosns',targetPosns)
+    
+%     %Restart the loop to use the new targets
+%     setappdata(handles.AIGui,'runState',0)
+%     pause(0.1)
+%     setappdata(handles.AIGui,'runState',1)
+%     mainRunLoop(handles);
+    
+    disp('New targets set')
+end
+
+
+
+    
+
+
+
+function numAvsBox_Callback(hObject, eventdata, handles)
+% hObject    handle to numAvsBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of numAvsBox as text
+%        str2double(get(hObject,'String')) returns contents of numAvsBox as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function numAvsBox_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to numAvsBox (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    empty - handles not created until after all CreateFcns called
 
