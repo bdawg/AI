@@ -85,6 +85,7 @@ vidUpdateRate = 5;     % Default frame rate to display live video (FPS).
 
 %lineProfYMax = 15000;  % Default max y axis for line profile
 
+dataSavePrefix = '\data\aiDataSave_';
 
 memsDefaultStepSize = 0.05;
 memsScanRange = -3:0.05:3; %TODO - enter this through GUI
@@ -174,6 +175,7 @@ allSubIms = zeros(winSize, winSize, nSubs);
 setappdata(handles.AIGui,'allSubIms', allSubIms);
 setappdata(handles.AIGui,'curAllCogX',zeros(length(segNums)));
 setappdata(handles.AIGui,'curAllCogY',zeros(length(segNums)));
+setappdata(handles.AIGui,'dataSavePrefix',dataSavePrefix);
 
 %%%%%%%%%%%%%%%%%%% Set GUI values %%%%%%%%%%%%%%%%%%%
 set(handles.expTimeBox,'string',num2str(expTime))
@@ -204,7 +206,7 @@ set(handles.iGainBox,'String',num2str(iGain));
 set(handles.dGainBox,'String',num2str(dGain));
 set(handles.loopStatusText,'String','Open');
 set(handles.loopStatusText,'ForegroundColor',[1 0 0]);
-
+set(handles.saveDataProgText,'String','');
 
 if ftMode == 1
     set(handles.NFTBtn,'Value',0);
@@ -596,7 +598,7 @@ end
 function mainRunLoop(handles)
 
 nSamps = 200; %Number of loops to average for timing
-nIts = 15000; %Number of measurements to save to a file
+nIts = 10000; %Number of measurements to save to a file
 
 imPtr = getappdata(handles.AIGui,'imPtr');
 npixels = getappdata(handles.AIGui,'npixels');
@@ -756,7 +758,15 @@ while getappdata(handles.AIGui,'runState') == 1
  
         errorX(kk) = cur(1) - targetPosns(kk, 1);
         errorY(kk) = cur(2) - targetPosns(kk, 2);
-
+        
+        % Get rid of NaNs -  moving a MEMS segment to NaN breaks everything
+        if isnan(errorX(kk))
+                errorX(kk) = 0;
+        end
+        if isnan(errorY(kk))
+                errorY(kk) = 0;
+        end
+           
         % Do correction
         if doCorr
             newMemsPosnX(kk) = curMemsPosnX(kk) - errorX(kk)*pGain;
@@ -766,15 +776,19 @@ while getappdata(handles.AIGui,'runState') == 1
         % Enforce hard limits
         if (newMemsPosnX(kk) < hardLims(1,1))
             newMemsPosnX(kk) = hardLims(1,1);
+            %disp('Hard limit reached')
         end
         if (newMemsPosnX(kk) > hardLims(1,2))
             newMemsPosnX(kk) = hardLims(1,2);
+            %disp('Hard limit reached')
         end
         if (newMemsPosnY(kk) < hardLims(2,1))
             newMemsPosnY(kk) = hardLims(2,1);
+            %disp('Hard limit reached')
         end
         if (newMemsPosnY(kk) > hardLims(2,2))
             newMemsPosnY(kk) = hardLims(2,2);
+            %disp('Hard limit reached')
         end
 
     end
@@ -784,7 +798,7 @@ while getappdata(handles.AIGui,'runState') == 1
     if doCorr
         % Send new positions to MEMS
         curAllMemsPosn(segInds,2) = newMemsPosnX;
-        curAllMemsPosn(segInds,3) = newMemsPosnY;    
+        curAllMemsPosn(segInds,3) = newMemsPosnY;  
         SetMirrorPosition(memsHandle, memsSegsList, curAllMemsPosn);
         MirrorSendSettings(memsHandle);
         %%%%
@@ -797,17 +811,26 @@ while getappdata(handles.AIGui,'runState') == 1
     setappdata(handles.AIGui,'curAllCogY',allCogY);
     
     if getappdata(handles.AIGui,'saveDataState')
+        
+        if mod(count,500) == 0
+            str = [num2str(count/nIts*100,3) '%'];
+            set(handles.saveDataProgText,'String',str);
+        end
+        
         allCogXs(:,count) = allCogX;
         allCogYs(:,count) = allCogY;
         %imageCube(:,:,count) = im; %%%%%%%%%%%%%%%%%%%%%%%%%%%
         allSubImsMulti(:,:,:,count) = allSubIms;
         count=count+1;
         if count == nIts+1
+            set(handles.saveDataProgText,'String','');
             setappdata(handles.AIGui,'saveDataState',false)
             set(handles.saveDataBtn,'ForegroundColor',[0 0 1]);
             drawnow
             count=1;
-            dataFilename=['data\aiDataSave_' datestr(datetime,30)];
+            %dataFilename=['data\aiDataSave_' datestr(datetime,30)];
+            dataSavePrefix=getappdata(handles.AIGui,'dataSavePrefix');
+            dataFilename=[dataSavePrefix datestr(datetime,30)];
             save(dataFilename,'allCogXs','allCogYs','allSubImsMulti')
             set(handles.saveDataBtn,'ForegroundColor',[0 0 0]);
             

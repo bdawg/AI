@@ -3,11 +3,11 @@ clear all
 
 reSamp = 50;
 tStep=2;
-plotMin=-2;
-plotMax=2;
+plotMin=-4;
+plotMax=4;
 showAnimation = true;
 
-load('data/aiDataSave_20150930T140709')
+load('data/aiDataSave_20151015T165804')
 %load('data/aiDataSave_20150930T145344')
 %load('data/aiDataSave_20151001T171113')
 %load('data/aiDataSave_20151001T175859_set1_01')
@@ -23,7 +23,7 @@ clear allCogXs
 clear allCogYs
 nVals = size(allCogXsOpen,2);
 
-load('data/aiDataSave_20150930T140813')
+load('data/aiDataSave_20151015T165804')
 %load('data/aiDataSave_20151001T175951_set1_02')
 allSubImsMulti = allSubImsMulti(:,:,:,reSampInds);
 allCogXs = allCogXs(:,reSampInds);
