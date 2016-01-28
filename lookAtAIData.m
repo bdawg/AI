@@ -7,7 +7,7 @@
 %load('C:\Users\AI\Desktop\AIcode_pre21072015\data\sampledata_scan1-ind3_withbgSubt')
 
 
-load('data/sampledata_scan_04_ind3')
+load('sampledata_scan_20151129T194022_24px_ind3')
 %load('data/sampledata')
 %load('data/sampledata_scan05_16px_ind3')
 
@@ -18,6 +18,7 @@ load('data/sampledata_scan_04_ind3')
 
 itsAScan = true;
 fitReg=[300,700]; %As Indices of angles
+fitReg=[100,500]; %As Indices of angles
 %fitReg=[1,size(allCogX,2)];
 
 plotMin=-1;
@@ -31,6 +32,8 @@ doRot = true;
 setTheta = 60 /180*pi; %Seems to be correct to <+-1 deg for Horizontal config
 setTheta = (-59) /180*pi;
 setTheta = (30) /180*pi;
+
+setTheta = (32) /180*pi;
 
 Rmat = [ cos(setTheta), -sin(setTheta) ; sin(setTheta), cos(setTheta) ];
 

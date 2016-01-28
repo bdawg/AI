@@ -28,9 +28,9 @@ else
 end
 
 if cooling
-    targetTemp=-65;
+    targetTemp=-50  ;
     error=calllib('atmcd32d','SetFanMode',0); %0 is full on.
-    error=calllib('atmcd32d','SetTemperature',targetTemp);
+    error=calllib('atmcd32d','SetTemperature',targetTemp-5);
     error=calllib('atmcd32d','CoolerON');
     
     curTempPtr=libpointer('int32Ptr',0);

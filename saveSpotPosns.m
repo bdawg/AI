@@ -4,7 +4,7 @@
 
 nSpots=8;
 imsz=128;
-winSize = 16;%24;
+winSize = 16
 
 imagesc(im);
 disp('Click approximate positions of each spot, then press Enter.');
@@ -32,3 +32,4 @@ end
 
     
 save('winCents.mat', 'winCents');
+save(['winCents_' datestr(now,30) '.mat'], 'winCents');

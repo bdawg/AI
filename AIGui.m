@@ -22,7 +22,7 @@ function varargout = AIGui(varargin)
 
 % Edit the above text to modify the response to help AIGui
 
-% Last Modified by GUIDE v2.5 25-Oct-2015 17:45:53
+% Last Modified by GUIDE v2.5 08-Jan-2016 15:09:59
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -56,9 +56,12 @@ function AIGui_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 
 %%%%%%%%%%%%%%%%%%%%%%%% Default Settings %%%%%%%%%%%%%%%%%%%%%%%%%
-defaultRemoteIP = '129.78.137.229'; %IP address of Xenics computer
+%defaultRemoteIP = '10.88.18.2'; %IP address of Xenics computer
+defaultRemoteIP = '129.78.137.229';
 defaultRemotePort = 9090;
 defaultLocalPort = 9091;
+
+logFile = 'AILogfile.txt';
 
 xenicsType = 640; %Set to 320 or 640, accordingly.
 
@@ -75,7 +78,7 @@ ftMode = 1;     % 0 = NFT, 1 = FT
 delayTime = 0; % A wait after MEMS move before the next frame acquired
 
 coolingOn = 1;        % =1 for On.
-targetTemp = -65;     % In degrees C
+targetTemp = -85;     % In degrees C
 showVideoOn = 1;       % =1 for On.
 
 guiUpdateRate = 2;     % Default frame rate to update GUI 
@@ -88,15 +91,19 @@ vidUpdateRate = 5;     % Default frame rate to display live video (FPS).
 dataSavePrefix = '\data\aiDataSave_';
 
 memsRange = [-3, 3]; %TODO - enter this through GUI
-memsDefaultStepSize = 0.5;
+memsDefaultStepSize = 0.5;  %%%%%%%%%Important%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 scanWait=0.05; %Time to wait after MEMS move to send acq command
+scanWait=0.2
 
 memsScanRange = memsRange(1):memsDefaultStepSize:memsRange(2);
+
+pistonsVector = zeros(37,1);
+pistonsVector(28) = 0; %-0.2
 
 
 MirrorSerialNumberString = 'FSC37-02-01-0310';
 DriverSerialNumberString = '11140003';
-HardwareDisableFlag = false;
+HardwareDisableFlag = false; %%%%%%%%%%%%%%%%%%%%%%%%
 
 pGain = 0.5;
 iGain = 0.0;
@@ -109,28 +116,56 @@ dGain = 0.0;
 % mY = 2.8349;
 % bY = -4.3208;
 
-memsTheta = (30) /180*pi;
-mX = -2.8348;
-mY = 2.8673;
-bX = 4.6337;
-bY = 17.8877;
+% memsTheta = (30) /180*pi;
+% mX = -2.8348;
+% mY = 2.8673;
+% bX = 4.6337;
+% bY = 17.8877;
+% 
+% % AAT 23/11/2015
+% memsTheta = (30) /180*pi;
+% mX = -2.71;
+% mY = 2.6638;
+% bX = 4.2371;
+% bY = 9.8939;
 
-% 16 px window version:
-% mX = 2.7506;
-% bX = 10.0892;
-% mY = 2.8174;
-% bY = -4.5733;
+
+
+% AAT 29/11/2015 - 2 hole mask (segs 28,36)
+% 16 px window:
+memsTheta = (32) /180*pi;
+mX = -2.6664;
+mY = 2.5581;
+bX = 5.3522;
+bY = 9.634;
+
+% 24 px window:
+% memsTheta = (32) /180*pi;
+% mX = -2.7162;
+% mY = 2.7942;
+% bX = 3.8116;
+% bY = 17.7914;
+
+
+
 
 hardLims = [ [-3, 3] ; [-3, 3] ]; %MEMS will not move past this in loop
+
 segNums = [30, 27, 25, 23, 21, 37, 35, 17]; %Segment numbers
-photomSegNums = [35 37 21 17 23 30 25 27]; %Segments correspodnign to photometric taps
-winSize = 24; %Size of subwindow for COG measurement
+%segNums = [30, 28, 25, 23, 21, 36, 35, 17]; %Segment numbers - changed for new nuller posn
+
+%photomSegNums = [35 37 21 17 23 30 25 27]; %Segments correspodnign to photometric taps
+photomSegNums = [27, 25, 30, 23, 17, 21, 37, 35];
+
+winSize = 16; %Size of subwindow for COG measurement
 winCentFilename = 'winCents.mat';
 bgRegion = [ 55,75 ; 55, 75]; %row;col
 nSubs = length(segNums);
 
 %For now, set the target positions to the original centres
 targetPosns = zeros(8,2);
+load('targetPosns.mat'); %%%%%%%%%%%%%%%%%%%%%%%%%%
+disp('Loading targetPosns.mat')
 
 bgHeight = bgRegion(1,2) - bgRegion(1,1);
 bgWidth = bgRegion(2,2) - bgRegion(2,1);
@@ -179,7 +214,9 @@ setappdata(handles.AIGui,'curAllCogX',zeros(length(segNums)));
 setappdata(handles.AIGui,'curAllCogY',zeros(length(segNums)));
 setappdata(handles.AIGui,'dataSavePrefix',dataSavePrefix);
 setappdata(handles.AIGui,'scanWait',scanWait);
-
+setappdata(handles.AIGui,'pistonsVector',pistonsVector);
+logFid = fopen(logFile, 'at');
+setappdata(handles.AIGui,'logFid',logFid);
 
 %%%%%%%%%%%%%%%%%%% Set GUI values %%%%%%%%%%%%%%%%%%%
 set(handles.expTimeBox,'string',num2str(expTime))
@@ -664,8 +701,9 @@ curIt = 0;
 %imStoreCube=zeros(128,128,1000);
 %curIt2 = 1;
 %%%%
-
-calllib('atmcd32d','StartAcquisition');
+error = calllib('atmcd32d','AbortAcquisition');
+pause(1)
+error = calllib('atmcd32d','StartAcquisition');
 tic
 while getappdata(handles.AIGui,'runState') == 1
     
@@ -678,7 +716,8 @@ while getappdata(handles.AIGui,'runState') == 1
     curMemsPosnY = ReachablePositions(segInds,3);
     curAllMemsPosn = ReachablePositions;
 
-    error=calllib('atmcd32d','WaitForAcquisition');
+    %error=calllib('atmcd32d','WaitForAcquisition');
+    error=calllib('atmcd32d','WaitForAcquisitionTimeOut',10000); %Time out after 10 seconds
     getimerr=calllib('atmcd32d','GetMostRecentImage',imPtr,npixels);
     im=imPtr.value;
     setappdata(handles.AIGui,'currentIm',im);
@@ -803,6 +842,7 @@ while getappdata(handles.AIGui,'runState') == 1
         % Send new positions to MEMS
         curAllMemsPosn(segInds,2) = newMemsPosnX;
         curAllMemsPosn(segInds,3) = newMemsPosnY;  
+            curAllMemsPosn(:,1) = getappdata(handles.AIGui,'pistonsVector');
         SetMirrorPosition(memsHandle, memsSegsList, curAllMemsPosn);
         MirrorSendSettings(memsHandle);
         %%%%
@@ -908,10 +948,10 @@ error=calllib('atmcd32d','SetShutter',0,2,10,10);
 pause(2)
 error=calllib('atmcd32d','ShutDown');
 
-%pause(2)
-%unloadlibrary atmcd32d;
-%pause(1)
-disp('Skipping unload library')
+pause(2)
+unloadlibrary atmcd32d;
+pause(1)
+%disp('Skipping unload library')
 
 
 % Release MEMS
@@ -922,6 +962,9 @@ pause(1)
 udpXenics=getappdata(handles.AIGui,'udpXenics');
 fclose(udpXenics)
 delete(udpXenics)
+
+logFid=getappdata(handles.AIGui,'logFid');
+fclose(logFid);
 
 delete(handles.AIGui);
 delete(handles.valTimer)
@@ -1003,6 +1046,8 @@ end
 
 % TODO: The following doesn't work...
 %plot(winCents(:,2)+targetPosns(:,2),winCents(:,1)+targetPosns(:,1),'go','Parent',handles.axesDetectorView)
+plot(winCents(:,2),winCents(:,1),'go','Parent',handles.axesDetectorView)
+
 rectangle('Position',bgRect,'EdgeColor','y','Linestyle','--','Parent',handles.axesDetectorView)
 
 hold(handles.axesDetectorView,'off')
@@ -1927,6 +1972,7 @@ if strcmp(response,'Yes')
 %     setappdata(handles.AIGui,'runState',1)
 %     mainRunLoop(handles);
     
+    save(['newTargetsAutosave_' datestr(now,30) '.mat'],'targetPosns')
     disp('New targets set')
 end
 
@@ -1982,18 +2028,24 @@ memsScanRange=getappdata(handles.AIGui,'memsScanRange');
 nPosns=length(memsScanRange);
 udpXenics=getappdata(handles.AIGui,'udpXenics');
 PTTPositionOn=getappdata(handles.AIGui,'PTTPositionOn');
+logFid=getappdata(handles.AIGui,'logFid');
 
 udpWaitIts = 1000; %Wait for command this*0.01s. 
-errordlg(['Note: In the current version you must set the filename and number of frames manually in XenicsLight. Number of frames is ' num2str(nPosns)],'Warning');
+%errordlg(['Note: In the current version you must set the filename and number of frames manually in XenicsLight. Number of frames is ' num2str(nPosns)],'Warning');
+errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(length(segInds)) ' and number of frames is ' num2str(nPosns)],'Warning');
 uiwait
 
 for ss = 1:length(segInds)
     seg = segInds(ss);
-    scanStatusString = ['Doing Piston Scan for Seg ' num2str(seg)];
+    scanStatusString = ['Doing Piston All-On Scan for Seg ' num2str(seg)];
     set(handles.scanStatusText,'String',scanStatusString);
     set(handles.scanStatusText,'Visible','On');
+
+    logText = [datestr(clock,30) ' ' scanStatusString];
+    disp(logText)
+    fprintf(logFid,[logText '\n']);
     
-    for p = 1:nPosns
+    for p = 1:nPosns   
         PTTNewPosition = PTTPositionOn;
         PTTNewPosition(seg,1) = memsScanRange(p);
         SetMirrorPosition(memsHandle, memsSegsList, PTTNewPosition);
@@ -2005,26 +2057,27 @@ for ss = 1:length(segInds)
         fprintf(udpXenics,'acq');
              
         %Now wait for acquisition confirmation
-        for jj = 1:udpWaitIts
-            if udpXenics.BytesAvailable >= 3
-                cmdIn = fscanf(udpXenics);
-                switch cmdIn
-                    case 'cnf'
-                        disp([datestr(clock,'HH:MM:SS.FFF') ' Acquistion Confirmed'])
-                        break
-                    otherwise
-                        disp('Received unknown command')
+        if get(handles.waitForAcqCheckbox,'Value')
+            for jj = 1:udpWaitIts
+                if udpXenics.BytesAvailable >= 3
+                    cmdIn = fscanf(udpXenics);
+                    switch cmdIn
+                        case 'cnf'
+                            disp([datestr(clock,'HH:MM:SS.FFF') ' Acquistion Confirmed'])
+                            break
+                        otherwise
+                            disp('Received unknown command')
+                    end
                 end
+                if jj == udpWaitIts
+                    disp('No UDP command received before timeout!')
+                    errordlg('No command received','No UDP command received before timeout!')
+                    %setappdata(handles.guihandle,'abortFlag',true);
+                    % TODO - Make ABORT system
+                end
+                pause(0.01)             
             end
-            if jj == udpWaitIts
-                disp('No UDP command received before timeout!')
-                errordlg('No command received','No UDP command received before timeout!')
-                %setappdata(handles.guihandle,'abortFlag',true);
-                % TODO - Make ABORT system
-            end
-            pause(0.01)             
         end
-
         
         
         
@@ -2055,10 +2108,11 @@ nPosns=length(memsScanRange);
 udpXenics=getappdata(handles.AIGui,'udpXenics');
 PTTPositionOn=getappdata(handles.AIGui,'PTTPositionOn');
 PTTPositionOff=getappdata(handles.AIGui,'PTTPositionOff');
+logFid=getappdata(handles.AIGui,'logFid');
 
 udpWaitIts = 1000; %Wait for command this*0.01s. 
 
-totalNFiles = 28+8; %28 baselines plus 8 individual scans
+totalNFiles = 28*2;
 nBLs = 28;
 
 errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(totalNFiles) ' and number of frames is ' num2str(nPosns)],'Warning');
@@ -2079,6 +2133,10 @@ for k = 1:nBLs
         scanStatusString = ['Piston Scan for BL ' num2str(k) ...
             ', ' num2str(seg2pist) ' of 2'];
         set(handles.scanStatusText,'String',scanStatusString);
+        
+        logText = [datestr(clock,30) ' ' scanStatusString];
+        disp(logText)
+        fprintf(logFid,[logText '\n']);
             
         for p = 1:nPosns
             % Turn on the two segments
@@ -2125,21 +2183,171 @@ for k = 1:nBLs
         end
     end
 end
+set(handles.scanStatusText,'Visible','Off');
 
 
 
+% --- Executes on button press in nudgeTgtBtnA.
+function nudgeTgtBtnA_Callback(hObject, eventdata, handles)
+% hObject    handle to nudgeTgtBtnA (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+amt=0.5;
+targetPosns=getappdata(handles.AIGui,'targetPosns');
+seg=str2double(get(handles.nudgeSegNumBox,'String'));
+if seg == 0
+    targetPosns(:,1) =  targetPosns(:,1) + amt;
+else
+    targetPosns(seg,1) =  targetPosns(seg,1) + amt;
+end
+setappdata(handles.AIGui,'targetPosns',targetPosns)
+
+% --- Executes on button press in nudgeTgtBtnD.
+function nudgeTgtBtnD_Callback(hObject, eventdata, handles)
+% hObject    handle to nudgeTgtBtnD (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+amt=0.5;
+targetPosns=getappdata(handles.AIGui,'targetPosns');
+seg=str2double(get(handles.nudgeSegNumBox,'String'));
+if seg == 0
+    targetPosns(:,2) =  targetPosns(:,2) - amt;
+else
+    targetPosns(seg,2) =  targetPosns(seg,2) - amt;
+end
+setappdata(handles.AIGui,'targetPosns',targetPosns)
+
+% --- Executes on button press in nudgeTgtBtnC.
+function nudgeTgtBtnC_Callback(hObject, eventdata, handles)
+% hObject    handle to nudgeTgtBtnC (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+amt=0.5;
+targetPosns=getappdata(handles.AIGui,'targetPosns');
+seg=str2double(get(handles.nudgeSegNumBox,'String'));
+if seg == 0
+    targetPosns(:,2) =  targetPosns(:,2) + amt;
+else
+    targetPosns(seg,2) =  targetPosns(seg,2) + amt;
+end
+setappdata(handles.AIGui,'targetPosns',targetPosns)
+
+% --- Executes on button press in nudgeTgtBtnB.
+function nudgeTgtBtnB_Callback(hObject, eventdata, handles)
+% hObject    handle to nudgeTgtBtnB (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+amt=0.5;
+targetPosns=getappdata(handles.AIGui,'targetPosns');
+seg=str2double(get(handles.nudgeSegNumBox,'String'));
+if seg == 0
+    targetPosns(:,1) =  targetPosns(:,1) - amt;
+else
+    targetPosns(seg,1) =  targetPosns(seg,1) - amt;
+end
+setappdata(handles.AIGui,'targetPosns',targetPosns)
 
 
+function nudgeSegNumBox_Callback(hObject, eventdata, handles)
+% hObject    handle to nudgeSegNumBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of nudgeSegNumBox as text
+%        str2double(get(hObject,'String')) returns contents of nudgeSegNumBox as a double
 
 
+% --- Executes during object creation, after setting all properties.
+function nudgeSegNumBox_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to nudgeSegNumBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
 
 
+% --- Executes on button press in pistonScanOffBtn.
+function pistonScanOffBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to pistonScanOffBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+scanWait=getappdata(handles.AIGui,'scanWait'); %Time to wait after MEMS move to send acq command
+segNums = getappdata(handles.AIGui,'segNums');
+memsHandle=getappdata(handles.AIGui,'memsHandle');
+memsSegsList=getappdata(handles.AIGui,'memsSegsList');
+segInds = memsSegsList(segNums);
+memsScanRange=getappdata(handles.AIGui,'memsScanRange');
+nPosns=length(memsScanRange);
+udpXenics=getappdata(handles.AIGui,'udpXenics');
+PTTPositionOn=getappdata(handles.AIGui,'PTTPositionOn');
+PTTPositionOff=getappdata(handles.AIGui,'PTTPositionOff');
+logFid=getappdata(handles.AIGui,'logFid');
+
+udpWaitIts = 1000; %Wait for command this*0.01s. 
+%errordlg(['Note: In the current version you must set the filename and number of frames manually in XenicsLight. Number of frames is ' num2str(nPosns)],'Warning');
+errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(length(segInds)) ' and number of frames is ' num2str(nPosns)],'Warning');
+uiwait
+
+for ss = 1:length(segInds)
+    seg = segInds(ss);
+    scanStatusString = ['Doing Piston All-Off Scan for Seg ' num2str(seg)];
+    set(handles.scanStatusText,'String',scanStatusString);
+    set(handles.scanStatusText,'Visible','On');
+
+    logText = [datestr(clock,30) ' ' scanStatusString];
+    disp(logText)
+    fprintf(logFid,[logText '\n']);
+    
+    for p = 1:nPosns   
+        PTTNewPosition = PTTPositionOff;
+        PTTNewPosition(seg,:) = PTTPositionOn(seg,:);
+        
+        PTTNewPosition(seg,1) = memsScanRange(p);
+        SetMirrorPosition(memsHandle, memsSegsList, PTTNewPosition);
+        MirrorSendSettings(memsHandle);
+        [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
+        set(handles.memsPosnTable,'Data',ReachablePositions);
+            
+        pause(scanWait)
+        fprintf(udpXenics,'acq');
+             
+        %Now wait for acquisition confirmation
+        for jj = 1:udpWaitIts
+            if udpXenics.BytesAvailable >= 3
+                cmdIn = fscanf(udpXenics);
+                switch cmdIn
+                    case 'cnf'
+                        disp([datestr(clock,'HH:MM:SS.FFF') ' Acquistion Confirmed'])
+                        break
+                    otherwise
+                        disp('Received unknown command')
+                end
+            end
+            if jj == udpWaitIts
+                disp('No UDP command received before timeout!')
+                errordlg('No command received','No UDP command received before timeout!')
+                %setappdata(handles.guihandle,'abortFlag',true);
+                % TODO - Make ABORT system
+            end
+            pause(0.01)             
+        end
+
+        
+        
+        
+    end
+end
+set(handles.scanStatusText,'Visible','Off');
 
 
+% --- Executes on button press in waitForAcqCheckbox.
+function waitForAcqCheckbox_Callback(hObject, eventdata, handles)
+% hObject    handle to waitForAcqCheckbox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
 
-
-
-
-
-
-
+% Hint: get(hObject,'Value') returns toggle state of waitForAcqCheckbox

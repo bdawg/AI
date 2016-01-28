@@ -6,20 +6,20 @@ FTmode = 1
 showIms = false;
 
 bg=417; %Median background count - get from darks
-doAutoBG = true;
+doAutoBG = false;
 bgRegion = [ 55,75 ; 55, 75]; %row;col
 
 
 % This version scans through tip or tilt
-%angles=-3:0.01:3;
+angles=-3:0.01:3;
 %angles=-1:0.01:1;
 %angles=-2.5:0.01:2.5;
-angles=-5:0.01:5;
+%angles=-5:0.01:5;
 %angles=-5:0.1:5
 %angles=-5:1:5
 
-tipTiltIndex = 2; %2 or 3
-waitTime = 0.005; %wait this long between MEMS movement and image
+tipTiltIndex = 3   ; %2 or 3
+waitTime = 0.04; %wait this long between MEMS movement and image
 numIts = length(angles);
 cooling = true;
 
@@ -31,7 +31,7 @@ memsTestPosn = repmat([3, 2, 0],37,1);
 %winCents = [100, 102; ...
 %               103, 34] ;      
 load('winCents.mat');
-winSize = 16;%24;  
+winSize = 24;  
 
 %For now, set the target positions to the original centres
 targetPosns = winCents;
@@ -75,9 +75,9 @@ else
 end
 
 if cooling
-    targetTemp=-65;
+    targetTemp=-60;
     error=calllib('atmcd32d','SetFanMode',0); %0 is full on.
-    error=calllib('atmcd32d','SetTemperature',targetTemp);
+    error=calllib('atmcd32d','SetTemperature',targetTemp-5);
     error=calllib('atmcd32d','CoolerON');
     
     curTempPtr=libpointer('int32Ptr',0);
@@ -192,7 +192,7 @@ disp(strcat('Average time per frame: ',num2str(T/numIts)))
 calllib('atmcd32d','AbortAcquisition');
        
 
-save('data/sampledata_scan_autosave.mat','allCogX','allCogY','allSubIms','angles','imCube')
+save(['sampledata_scan_autosave_' datestr(now,30) '.mat'],'allCogX','allCogY','allSubIms','angles','imCube')
 
 disp('Finished - press any key to shutdown')
 pause
