@@ -1,5 +1,5 @@
 
-ExpTime = 0.005 
+ExpTime = 0.001 
 FTmode = 1
 %numIts = 1000;
 
@@ -31,7 +31,7 @@ memsTestPosn = repmat([3, 2, 0],37,1);
 %winCents = [100, 102; ...
 %               103, 34] ;      
 load('winCents.mat');
-winSize = 24;  
+winSize = 16;  
 
 %For now, set the target positions to the original centres
 targetPosns = winCents;
@@ -75,7 +75,7 @@ else
 end
 
 if cooling
-    targetTemp=-60;
+    targetTemp=-40;
     error=calllib('atmcd32d','SetFanMode',0); %0 is full on.
     error=calllib('atmcd32d','SetTemperature',targetTemp-5);
     error=calllib('atmcd32d','CoolerON');

@@ -22,7 +22,7 @@ function varargout = AIGui(varargin)
 
 % Edit the above text to modify the response to help AIGui
 
-% Last Modified by GUIDE v2.5 08-Jan-2016 15:09:59
+% Last Modified by GUIDE v2.5 29-Jan-2016 11:34:56
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -90,12 +90,15 @@ vidUpdateRate = 5;     % Default frame rate to display live video (FPS).
 
 dataSavePrefix = '\data\aiDataSave_';
 
-memsRange = [-3, 3]; %TODO - enter this through GUI
-memsDefaultStepSize = 0.5;  %%%%%%%%%Important%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+memsRange = [-1.5, 1.5]; %TODO - enter this through GUI
+memsOptimRange = [-3, 3];
+memsDefaultStepSize = 0.1;  %%%%%%%%%Important%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+memsOptimStepSize = 0.5;
 scanWait=0.05; %Time to wait after MEMS move to send acq command
 scanWait=0.2
 
-memsScanRange = memsRange(1):memsDefaultStepSize:memsRange(2);
+memsScanRange = memsRange(1):memsDefaultStepSize:memsRange(2); %This is for measurement scans
+memsScanRangeOptim = memsOptimRange(1):memsOptimStepSize:memsOptimRange(2); %This is for optimisation scans
 
 pistonsVector = zeros(37,1);
 pistonsVector(28) = 0; %-0.2
@@ -133,11 +136,11 @@ dGain = 0.0;
 
 % AAT 29/11/2015 - 2 hole mask (segs 28,36)
 % 16 px window:
-memsTheta = (32) /180*pi;
-mX = -2.6664;
-mY = 2.5581;
-bX = 5.3522;
-bY = 9.634;
+% memsTheta = (32) /180*pi;
+% mX = -2.6664;
+% mY = 2.5581;
+% bX = 5.3522;
+% bY = 9.634;
 
 % 24 px window:
 % memsTheta = (32) /180*pi;
@@ -146,8 +149,12 @@ bY = 9.634;
 % bX = 3.8116;
 % bY = 17.7914;
 
-
-
+% Sydney lab 21012016 (16 px window)
+memsTheta = (27) /180*pi;
+mX = -2.7688;
+mY = 2.8132;
+bX = 4.1263;
+bY = 11.9286;
 
 hardLims = [ [-3, 3] ; [-3, 3] ]; %MEMS will not move past this in loop
 
@@ -164,7 +171,7 @@ nSubs = length(segNums);
 
 %For now, set the target positions to the original centres
 targetPosns = zeros(8,2);
-load('targetPosns.mat'); %%%%%%%%%%%%%%%%%%%%%%%%%%
+%%load('targetPosns.mat'); %%%%%%%%%%%%%%%%%%%%%%%%%%
 disp('Loading targetPosns.mat')
 
 bgHeight = bgRegion(1,2) - bgRegion(1,1);
@@ -205,6 +212,7 @@ setappdata(handles.AIGui,'bgRegion', bgRegion);
 setappdata(handles.AIGui,'bgRect', bgRect);
 setappdata(handles.AIGui,'targetPosns',targetPosns)
 setappdata(handles.AIGui,'memsScanRange',memsScanRange);
+setappdata(handles.AIGui,'memsScanRangeOptim',memsScanRangeOptim);
 setappdata(handles.AIGui,'curPx',zeros(nSubs,2));
 setappdata(handles.AIGui,'maxVal', 0.);
 setappdata(handles.AIGui,'hardLims', hardLims);
@@ -217,6 +225,7 @@ setappdata(handles.AIGui,'scanWait',scanWait);
 setappdata(handles.AIGui,'pistonsVector',pistonsVector);
 logFid = fopen(logFile, 'at');
 setappdata(handles.AIGui,'logFid',logFid);
+setappdata(handles.AIGui,'suppressWarnings',false);
 
 %%%%%%%%%%%%%%%%%%% Set GUI values %%%%%%%%%%%%%%%%%%%
 set(handles.expTimeBox,'string',num2str(expTime))
@@ -1724,6 +1733,7 @@ function doMemsScanBtn_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 timeout=5; %Timeout to wait for data (s)
+interpAmt = 10; %Interpolated map is nPosns*this
 
 scanWait=getappdata(handles.AIGui,'scanWait'); %Time to wait after MEMS move to send acq command
 segNums = getappdata(handles.AIGui,'segNums');
@@ -1732,7 +1742,7 @@ memsSegsList=getappdata(handles.AIGui,'memsSegsList');
 photomSegNums=getappdata(handles.AIGui,'photomSegNums');
 targetPosns=getappdata(handles.AIGui,'targetPosns');
 segInds = memsSegsList(segNums);
-memsScanRange=getappdata(handles.AIGui,'memsScanRange');
+memsScanRange=getappdata(handles.AIGui,'memsScanRangeOptim');
 nPosns=length(memsScanRange);
 dataBytes=getappdata(handles.AIGui,'dataBytes');
 
@@ -1788,24 +1798,48 @@ for ss = 1:length(segInds)
     
     % Find the max and show the result
     curVals = allPhotomValues(:,:,ss);
-    disp('Gauss filter in MEMS Scan ENABLED');
-    curVals=imgaussfilt(curVals,1);
+    
+    disp('Interpolating MEMS Scan');
+    interpStep = (max(memsScanRange) - min(memsScanRange)) / (nPosns * interpAmt);
+    interpMemsRange = min(memsScanRange):interpStep:max(memsScanRange);
+    [Xo, Yo] = meshgrid(memsScanRange);
+    [Xq, Yq] = meshgrid(interpMemsRange);
+    interpMap = interp2(Xo, Yo, curVals, Xq, Yq, 'cubic');
+    %curVals=imgaussfilt(curVals,1);
+    
+    %%% This block is for no interpolation
+%     hold(handles.axesMemsScan,'on');
+%     cla
+%     imagesc(memsScanRange, memsScanRange, curVals,'Parent',handles.axesMemsScan)
+%     axis([memsScanRange(1) memsScanRange(end) ...
+%        memsScanRange(1) memsScanRange(end)])
+%     %set(handles.axesMemsScan,'XTickLabel','')
+%     %set(handles.axesMemsScan,'YTickLabel','')
+%     %axis tight
+%     [m, maxInd] = max(curVals(:));
+%     [maxIndX, maxIndY] = ind2sub(size(curVals),maxInd);
+%     maxPosX=memsScanRange(maxIndX);
+%     maxPosY=memsScanRange(maxIndY);
+%     plot(maxPosY,maxPosX,'xr')
+%     hold(handles.axesMemsScan,'off');
+
+    %%% This block is for interpolation
     hold(handles.axesMemsScan,'on');
     cla
-    imagesc(memsScanRange, memsScanRange, curVals,'Parent',handles.axesMemsScan)
-    axis([memsScanRange(1) memsScanRange(end) ...
-       memsScanRange(1) memsScanRange(end)])
+    imagesc(interpMemsRange, interpMemsRange, interpMap,'Parent',handles.axesMemsScan)
+    axis([interpMemsRange(1) interpMemsRange(end) ...
+       interpMemsRange(1) interpMemsRange(end)])
     %set(handles.axesMemsScan,'XTickLabel','')
     %set(handles.axesMemsScan,'YTickLabel','')
     %axis tight
-    [m, maxInd] = max(curVals(:));
-    [maxIndX, maxIndY] = ind2sub(size(curVals),maxInd);
-    maxPosX=memsScanRange(maxIndX);
-    maxPosY=memsScanRange(maxIndY);
+    [m, maxInd] = max(interpMap(:));
+    [maxIndX, maxIndY] = ind2sub(size(interpMap),maxInd);
+    maxPosX=interpMemsRange(maxIndX);
+    maxPosY=interpMemsRange(maxIndY);
     plot(maxPosY,maxPosX,'xr')
-    hold(handles.axesMemsScan,'off');
+    hold(handles.axesMemsScan,'off');   
     
-    allBestMemsPosns(:,ss) = [maxPosX, maxPosY];
+    allBestMemsPosns(:,ss) = [maxPosX, maxPosY]
     
     %Set the current MEMS position to the best one
     PTTCurrentPosition = getappdata(handles.AIGui,'PTTCurrentPosition');
@@ -1815,6 +1849,9 @@ for ss = 1:length(segInds)
     MirrorSendSettings(memsHandle);
     set(handles.memsPosnTable,'Data',PTTCurrentPosition);
     setappdata(handles.AIGui,'PTTCurrentPosition',PTTCurrentPosition);
+%    [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
+%    set(handles.memsPosnTable,'Data',ReachablePositions);
+
 end
 set(handles.scanStatusText,'Visible','Off');
 
@@ -2032,8 +2069,10 @@ logFid=getappdata(handles.AIGui,'logFid');
 
 udpWaitIts = 1000; %Wait for command this*0.01s. 
 %errordlg(['Note: In the current version you must set the filename and number of frames manually in XenicsLight. Number of frames is ' num2str(nPosns)],'Warning');
-errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(length(segInds)) ' and number of frames is ' num2str(nPosns)],'Warning');
-uiwait
+if ~getappdata(handles.AIGui,'suppressWarnings')
+    errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(length(segInds)) ' and number of frames is ' num2str(nPosns)],'Warning');
+    uiwait
+end
 
 for ss = 1:length(segInds)
     seg = segInds(ss);
@@ -2115,8 +2154,10 @@ udpWaitIts = 1000; %Wait for command this*0.01s.
 totalNFiles = 28*2;
 nBLs = 28;
 
-errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(totalNFiles) ' and number of frames is ' num2str(nPosns)],'Warning');
-uiwait
+if ~getappdata(handles.AIGui,'suppressWarnings')
+    errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(totalNFiles) ' and number of frames is ' num2str(nPosns)],'Warning');
+    uiwait
+end
 
 baselines=zeros(28,2);
 cnt=1;
@@ -2289,8 +2330,10 @@ logFid=getappdata(handles.AIGui,'logFid');
 
 udpWaitIts = 1000; %Wait for command this*0.01s. 
 %errordlg(['Note: In the current version you must set the filename and number of frames manually in XenicsLight. Number of frames is ' num2str(nPosns)],'Warning');
-errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(length(segInds)) ' and number of frames is ' num2str(nPosns)],'Warning');
-uiwait
+if ~getappdata(handles.AIGui,'suppressWarnings')
+    errordlg(['Note: In the current version you must set the filename and number of frames and files manually in XenicsLight. Number of files is ' num2str(length(segInds)) ' and number of frames is ' num2str(nPosns)],'Warning');
+    uiwait
+end
 
 for ss = 1:length(segInds)
     seg = segInds(ss);
@@ -2351,3 +2394,23 @@ function waitForAcqCheckbox_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 % Hint: get(hObject,'Value') returns toggle state of waitForAcqCheckbox
+
+
+% --- Executes on button press in theLotBtn.
+function theLotBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to theLotBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+setappdata(handles.AIGui,'suppressWarnings',true);
+
+errordlg('This will do all three scan types. Make sure nFiles and nFrames is set correctly in XenicsLight!!','Warning');
+uiwait
+
+disp('Doing Piston Scans (All On)')
+pistonScanBtn_Callback(hObject, eventdata, handles)
+disp('Doing Piston Scans (All Off)')
+pistonScanOffBtn_Callback(hObject, eventdata, handles)
+disp('Doing All Baseline Scans')
+allBlScansBtn_Callback(hObject, eventdata, handles)
+setappdata(handles.AIGui,'suppressWarnings',false);
+

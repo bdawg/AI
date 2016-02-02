@@ -12,7 +12,7 @@ showAnimation = true;
 %load('data/aiDataSave_20151001T171113')
 %load('data/aiDataSave_20151001T175859_set1_01')
 
-load('data/aiDataSave_20151125T030431')
+load('data/aiDataSave_20160131T124406.mat')
 
 nVals = size(allCogXs,2);
 nSubs = size(allCogXs,1);

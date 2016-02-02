@@ -12,7 +12,8 @@ showAnimation = true;
 %load('data/aiDataSave_20151001T171113')
 %load('data/aiDataSave_20151001T175859_set1_01')
 
-load('data/aiDataSave_20151125T030431')
+load('\data\aiDataSave_20160131T124406') %Seeing
+%load('\data\aiDataSave_20160131T141047') %AO
 
 nVals = size(allCogXs,2);
 nSubs = size(allCogXs,1);
@@ -25,9 +26,13 @@ clear allCogXs
 clear allCogYs
 nVals = size(allCogXsOpen,2);
 
+
+
 %load('data/aiDataSave_20151015T165804')
-load('data/aiDataSave_20151125T030431.mat')
+%load('data/aiDataSave_20151125T030431.mat')
 %load('data/aiDataSave_20151001T175951_set1_02')
+load('\data\aiDataSave_20160131T125653') %AI
+
 allSubImsMulti = allSubImsMulti(:,:,:,reSampInds);
 allCogXs = allCogXs(:,reSampInds);
 allCogYs = allCogYs(:,reSampInds);

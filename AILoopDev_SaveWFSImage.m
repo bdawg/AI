@@ -1,5 +1,5 @@
 
-ExpTime = 0.005 
+ExpTime = 0.001 
 FTmode = 0
 %numIts = 1000;
 
@@ -28,7 +28,7 @@ else
 end
 
 if cooling
-    targetTemp=-50  ;
+    targetTemp=-30  ;
     error=calllib('atmcd32d','SetFanMode',0); %0 is full on.
     error=calllib('atmcd32d','SetTemperature',targetTemp-5);
     error=calllib('atmcd32d','CoolerON');
