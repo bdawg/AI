@@ -2,7 +2,7 @@
 % full image should be in 'im'
 
 
-nSpots=8;
+nSpots=2;%8;
 imsz=128;
 winSize = 16
 

@@ -7,7 +7,7 @@
 %load('C:\Users\AI\Desktop\AIcode_pre21072015\data\sampledata_scan1-ind3_withbgSubt')
 
 
-load('sampledata_scan_autosave_20160131T113136_ind3')
+load('sampledata_scan_autosave_20160210T092144')
 %load('data/sampledata')
 %load('data/sampledata_scan05_16px_ind3')
 
@@ -17,6 +17,7 @@ load('sampledata_scan_autosave_20160131T113136_ind3')
 %allCogY=allCogYs;
 
 itsAScan = true;
+nSubs = 2; %8
 fitReg=[300,700]; %As Indices of angles
 fitReg=[100,500]; %As Indices of angles
 %fitReg=[1,size(allCogX,2)];
@@ -67,7 +68,7 @@ end
 
 allXCoeffs = zeros(nSubs,2);
 allYCoeffs = zeros(nSubs,2);
-for k = 1:8
+for k = 1:nSubs
     subplot(4,2,k)
 
     hold on

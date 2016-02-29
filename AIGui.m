@@ -22,7 +22,7 @@ function varargout = AIGui(varargin)
 
 % Edit the above text to modify the response to help AIGui
 
-% Last Modified by GUIDE v2.5 29-Jan-2016 11:34:56
+% Last Modified by GUIDE v2.5 03-Feb-2016 14:03:34
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -56,6 +56,9 @@ function AIGui_OpeningFcn(hObject, eventdata, handles, varargin)
 handles.output = hObject;
 
 %%%%%%%%%%%%%%%%%%%%%%%% Default Settings %%%%%%%%%%%%%%%%%%%%%%%%%
+nullerMode = true; %Enable this for the (two waveguide nuller), not Dragonfly
+nullerWGs = [28, 36];
+
 %defaultRemoteIP = '10.88.18.2'; %IP address of Xenics computer
 defaultRemoteIP = '129.78.137.229';
 defaultRemotePort = 9090;
@@ -101,7 +104,7 @@ memsScanRange = memsRange(1):memsDefaultStepSize:memsRange(2); %This is for meas
 memsScanRangeOptim = memsOptimRange(1):memsOptimStepSize:memsOptimRange(2); %This is for optimisation scans
 
 pistonsVector = zeros(37,1);
-pistonsVector(28) = 0; %-0.2
+%pistonsVector(28) = 0; %-0.2
 
 
 MirrorSerialNumberString = 'FSC37-02-01-0310';
@@ -111,6 +114,8 @@ HardwareDisableFlag = false; %%%%%%%%%%%%%%%%%%%%%%%%
 pGain = 0.5;
 iGain = 0.0;
 dGain = 0.0;
+
+sharedMemKey = 'nullerRTSHM';
 
 % Relationship of MEMS to WFS
 % memsTheta = (-59) /180*pi;
@@ -156,6 +161,14 @@ mY = 2.8132;
 bX = 4.1263;
 bY = 11.9286;
 
+% Sydney lab 10022016 (16 px window)
+memsTheta = (27) /180*pi;
+mX = -2.6957;
+mY = 2.7476;
+bX = 4.1624;
+bY = 12.1936;
+
+
 hardLims = [ [-3, 3] ; [-3, 3] ]; %MEMS will not move past this in loop
 
 segNums = [30, 27, 25, 23, 21, 37, 35, 17]; %Segment numbers
@@ -167,7 +180,7 @@ photomSegNums = [27, 25, 30, 23, 17, 21, 37, 35];
 winSize = 16; %Size of subwindow for COG measurement
 winCentFilename = 'winCents.mat';
 bgRegion = [ 55,75 ; 55, 75]; %row;col
-nSubs = length(segNums);
+
 
 %For now, set the target positions to the original centres
 targetPosns = zeros(8,2);
@@ -177,6 +190,11 @@ disp('Loading targetPosns.mat')
 bgHeight = bgRegion(1,2) - bgRegion(1,1);
 bgWidth = bgRegion(2,2) - bgRegion(2,1);
 bgRect = [bgRegion(2,1) bgRegion(1,1) bgWidth bgHeight];
+
+if nullerMode
+    segNums = nullerWGs;
+end
+nSubs = length(segNums);
 
 %%%%%%%%% Put variables into application data %%%%%%%%%
 setappdata(handles.AIGui,'expTime',expTime)
@@ -226,6 +244,9 @@ setappdata(handles.AIGui,'pistonsVector',pistonsVector);
 logFid = fopen(logFile, 'at');
 setappdata(handles.AIGui,'logFid',logFid);
 setappdata(handles.AIGui,'suppressWarnings',false);
+setappdata(handles.AIGui,'nullerMode',nullerMode);
+setappdata(handles.AIGui,'nullerWGs',nullerWGs);
+setappdata(handles.AIGui,'sharedMemKey',sharedMemKey);
 
 %%%%%%%%%%%%%%%%%%% Set GUI values %%%%%%%%%%%%%%%%%%%
 set(handles.expTimeBox,'string',num2str(expTime))
@@ -2414,3 +2435,317 @@ disp('Doing All Baseline Scans')
 allBlScansBtn_Callback(hObject, eventdata, handles)
 setappdata(handles.AIGui,'suppressWarnings',false);
 
+
+% --- Executes on button press in nullerOptBtn.
+function nullerOptBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to nullerOptBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+interpAmt = 10; %Interpolated map is nPosns*this
+%scanWait=0.5; %Time to wait after MEMS move to send acq command
+daqChans = [1, 4]; %Channels for each MEMS segment
+
+scanWait = str2double(get(handles.nullerScanwaitBox,'String'));
+segNums = getappdata(handles.AIGui,'segNums');
+memsHandle=getappdata(handles.AIGui,'memsHandle');
+memsSegsList=getappdata(handles.AIGui,'memsSegsList');
+segInds = memsSegsList(segNums);
+memsScanRange=getappdata(handles.AIGui,'memsScanRangeOptim');
+nPosns=length(memsScanRange);
+nSubs = length(segNums);
+sharedMemKey=getappdata(handles.AIGui,'sharedMemKey');
+
+PTTPositionFlat=getappdata(handles.AIGui,'PTTPositionFlat');
+SetMirrorPosition(memsHandle, memsSegsList, PTTPositionFlat);
+MirrorSendSettings(memsHandle);
+pause(scanWait)
+
+allPhotomValues=zeros(nPosns,nPosns,nSubs);
+allBestMemsPosns=zeros(2,nSubs);
+
+robj = shmref(sharedMemKey);
+
+%        pause(1) %%%%TESTING
+
+for ss = 1:length(segInds)
+    seg = segInds(ss);
+    scanStatusString = ['Doing MEMS Scan for Seg ' num2str(seg)];
+    set(handles.scanStatusText,'String',scanStatusString);
+    set(handles.scanStatusText,'Visible','On');
+    
+    for xx = 1:nPosns
+        for yy = 1:nPosns
+            PTTNewPosition = PTTPositionFlat;
+            PTTNewPosition(seg,2) = memsScanRange(xx);
+            PTTNewPosition(seg,3) = memsScanRange(yy);
+            SetMirrorPosition(memsHandle, memsSegsList, PTTNewPosition);
+            MirrorSendSettings(memsHandle);
+            [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
+            set(handles.memsPosnTable,'Data',ReachablePositions);
+            
+            pause(scanWait)
+            
+%             testvec=zeros(5000,1);
+%             for k = 1:5000
+                
+            % Get current flux values from shared memory
+            dataIn=(robj.data);
+            mnData = mean(dataIn,1);
+            allPhotomValues(xx,yy,ss)=mnData(daqChans(ss));
+                       
+%                 testvec(k) = mnData(1);
+%                 while toc < 0.001
+%                 end 
+%             end
+            
+        end
+        disp(['X position ' num2str(xx) ' of ' num2str(nPosns)])
+    end
+    
+    % Find the max and show the result
+    curVals = allPhotomValues(:,:,ss);
+    
+    disp('Interpolating MEMS Scan');
+    interpStep = (max(memsScanRange) - min(memsScanRange)) / (nPosns * interpAmt);
+    interpMemsRange = min(memsScanRange):interpStep:max(memsScanRange);
+    [Xo, Yo] = meshgrid(memsScanRange);
+    [Xq, Yq] = meshgrid(interpMemsRange);
+    interpMap = interp2(Xo, Yo, curVals, Xq, Yq, 'cubic');
+    %curVals=imgaussfilt(curVals,1);
+    
+    %%% This block is for no interpolation
+%     hold(handles.axesMemsScan,'on');
+%     cla
+%     imagesc(memsScanRange, memsScanRange, curVals,'Parent',handles.axesMemsScan)
+%     axis([memsScanRange(1) memsScanRange(end) ...
+%        memsScanRange(1) memsScanRange(end)])
+%     %set(handles.axesMemsScan,'XTickLabel','')
+%     %set(handles.axesMemsScan,'YTickLabel','')
+%     %axis tight
+%     [m, maxInd] = max(curVals(:));
+%     [maxIndX, maxIndY] = ind2sub(size(curVals),maxInd);
+%     maxPosX=memsScanRange(maxIndX);
+%     maxPosY=memsScanRange(maxIndY);
+%     plot(maxPosY,maxPosX,'xr')
+%     hold(handles.axesMemsScan,'off');
+
+    %%% This block is for interpolation
+    hold(handles.axesMemsScan,'on');
+    cla
+    imagesc(interpMemsRange, interpMemsRange, interpMap,'Parent',handles.axesMemsScan)
+    axis([interpMemsRange(1) interpMemsRange(end) ...
+       interpMemsRange(1) interpMemsRange(end)])
+    %set(handles.axesMemsScan,'XTickLabel','')
+    %set(handles.axesMemsScan,'YTickLabel','')
+    %axis tight
+    [m, maxInd] = max(interpMap(:));
+    [maxIndX, maxIndY] = ind2sub(size(interpMap),maxInd);
+    maxPosX=interpMemsRange(maxIndX);
+    maxPosY=interpMemsRange(maxIndY);
+    plot(maxPosY,maxPosX,'xr')
+    hold(handles.axesMemsScan,'off');   
+    
+    allBestMemsPosns(:,ss) = [maxPosX, maxPosY]
+    
+    %Set the current MEMS position to the best one
+    PTTCurrentPosition = getappdata(handles.AIGui,'PTTCurrentPosition');
+    PTTCurrentPosition(seg,2)=maxPosX;
+    PTTCurrentPosition(seg,3)=maxPosY;
+    SetMirrorPosition(memsHandle, memsSegsList, PTTCurrentPosition);
+    MirrorSendSettings(memsHandle);
+    set(handles.memsPosnTable,'Data',PTTCurrentPosition);
+    setappdata(handles.AIGui,'PTTCurrentPosition',PTTCurrentPosition);
+%    [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
+%    set(handles.memsPosnTable,'Data',ReachablePositions);
+
+end
+set(handles.scanStatusText,'Visible','Off');
+delete(robj);
+disp('Finished')
+
+
+
+function nullerScanwaitBox_Callback(hObject, eventdata, handles)
+% hObject    handle to nullerScanwaitBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of nullerScanwaitBox as text
+%        str2double(get(hObject,'String')) returns contents of nullerScanwaitBox as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function nullerScanwaitBox_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to nullerScanwaitBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes on button press in nullerDepth1DBtn.
+function nullerDepth1DBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to nullerDepth1DBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+%scanWait=0.5; %Time to wait after MEMS move to send acq command
+daqChans = [1, 4]; %Channels for each MEMS segment
+memsScanRange=-0.5:0.02:0.5;
+
+scanWait = str2double(get(handles.nullerScanwaitBox,'String'));
+segNums = getappdata(handles.AIGui,'segNums');
+memsHandle=getappdata(handles.AIGui,'memsHandle');
+memsSegsList=getappdata(handles.AIGui,'memsSegsList');
+segInds = memsSegsList(segNums);
+%memsScanRange=getappdata(handles.AIGui,'memsScanRangeOptim');
+nPosns=length(memsScanRange);
+nSubs = length(segNums);
+sharedMemKey=getappdata(handles.AIGui,'sharedMemKey');
+
+PTTPositionOn=getappdata(handles.AIGui,'PTTPositionOn');
+SetMirrorPosition(memsHandle, memsSegsList, PTTPositionOn);
+MirrorSendSettings(memsHandle);
+pause(scanWait)
+
+allPhotomValues=zeros(nPosns,1);
+allBestMemsPosns=zeros(1,1);
+
+robj = shmref(sharedMemKey);
+
+
+
+    seg = segInds(str2double(get(handles.nullerOffsetSeg,'String')));
+    scanStatusString = ['Doing Piston Scan for Seg ' num2str(seg)];
+    set(handles.scanStatusText,'String',scanStatusString);
+    set(handles.scanStatusText,'Visible','On');
+    
+    for pp = 1:nPosns
+            PTTNewPosition = PTTPositionOn;
+            PTTNewPosition(seg,1) = memsScanRange(pp);
+            SetMirrorPosition(memsHandle, memsSegsList, PTTNewPosition);
+            MirrorSendSettings(memsHandle);
+            [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
+            set(handles.memsPosnTable,'Data',ReachablePositions);
+            
+            pause(scanWait)
+            
+%             testvec=zeros(5000,1);
+%             for k = 1:5000
+                
+            % Get current flux values from shared memory
+            dataIn=(robj.data);
+            mnData = mean(dataIn,1);
+            allPhotomValues(pp)=mnData(2);
+                       
+%                 testvec(k) = mnData(1);
+%                 while toc < 0.001
+%                 end 
+%             end
+            
+ 
+        %disp(['X position ' num2str(xx) ' of ' num2str(nPosns)])
+    end
+    
+    % Find the max and show the result
+    curVals = allPhotomValues;
+    
+    figure(1)
+    plot(memsScanRange,curVals)
+    [m, minind] = min(curVals);
+    newPistVal = memsScanRange(minind);
+    disp(['Minimum at Piston of ' num2str(newPistVal)])
+    
+%     disp('Interpolating MEMS Scan');
+%     interpStep = (max(memsScanRange) - min(memsScanRange)) / (nPosns * interpAmt);
+%     interpMemsRange = min(memsScanRange):interpStep:max(memsScanRange);
+%     [Xo, Yo] = meshgrid(memsScanRange);
+%     [Xq, Yq] = meshgrid(interpMemsRange);
+%     interpMap = interp2(Xo, Yo, curVals, Xq, Yq, 'cubic');
+    %curVals=imgaussfilt(curVals,1);
+    
+    %%% This block is for no interpolation
+%     hold(handles.axesMemsScan,'on');
+%     cla
+%     imagesc(memsScanRange, memsScanRange, curVals,'Parent',handles.axesMemsScan)
+%     axis([memsScanRange(1) memsScanRange(end) ...
+%        memsScanRange(1) memsScanRange(end)])
+%     %set(handles.axesMemsScan,'XTickLabel','')
+%     %set(handles.axesMemsScan,'YTickLabel','')
+%     %axis tight
+%     [m, maxInd] = max(curVals(:));
+%     [maxIndX, maxIndY] = ind2sub(size(curVals),maxInd);
+%     maxPosX=memsScanRange(maxIndX);
+%     maxPosY=memsScanRange(maxIndY);
+%     plot(maxPosY,maxPosX,'xr')
+%     hold(handles.axesMemsScan,'off');
+
+    %%% This block is for interpolation
+%     hold(handles.axesMemsScan,'on');
+%     cla
+%     imagesc(interpMemsRange, interpMemsRange, interpMap,'Parent',handles.axesMemsScan)
+%     axis([interpMemsRange(1) interpMemsRange(end) ...
+%        interpMemsRange(1) interpMemsRange(end)])
+%     %set(handles.axesMemsScan,'XTickLabel','')
+%     %set(handles.axesMemsScan,'YTickLabel','')
+%     %axis tight
+%     [m, maxInd] = max(interpMap(:));
+%     [maxIndX, maxIndY] = ind2sub(size(interpMap),maxInd);
+%     maxPosX=interpMemsRange(maxIndX);
+%     maxPosY=interpMemsRange(maxIndY);
+%     plot(maxPosY,maxPosX,'xr')
+%     hold(handles.axesMemsScan,'off');   
+    
+%    allBestMemsPosns(:,ss) = [maxPosX, maxPosY]
+    
+    %Set the current MEMS position to the best one
+    PTTPosition = PTTPositionOn; %getappdata(handles.AIGui,'PTTCurrentPosition');
+    PTTPosition(seg,1)=newPistVal;
+    SetMirrorPosition(memsHandle, memsSegsList, PTTPosition);
+    MirrorSendSettings(memsHandle);
+    set(handles.memsPosnTable,'Data',PTTPosition);
+    setappdata(handles.AIGui,'PTTCurrentPosition',PTTPosition);
+%    [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
+%    set(handles.memsPosnTable,'Data',ReachablePositions);
+
+
+pistonsVector = PTTPosition(:,1);
+setappdata(handles.AIGui,'pistonsVector',pistonsVector);
+
+set(handles.scanStatusText,'Visible','Off');
+delete(robj);
+disp('Finished')
+
+
+function nullerOffsetSeg_Callback(hObject, eventdata, handles)
+% hObject    handle to nullerOffsetSeg (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of nullerOffsetSeg as text
+%        str2double(get(hObject,'String')) returns contents of nullerOffsetSeg as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function nullerOffsetSeg_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to nullerOffsetSeg (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes on button press in nullerDepth3DBtn.
+function nullerDepth3DBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to nullerDepth3DBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
