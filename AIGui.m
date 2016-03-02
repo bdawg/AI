@@ -22,7 +22,7 @@ function varargout = AIGui(varargin)
 
 % Edit the above text to modify the response to help AIGui
 
-% Last Modified by GUIDE v2.5 03-Feb-2016 14:03:34
+% Last Modified by GUIDE v2.5 01-Mar-2016 17:36:36
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -91,6 +91,11 @@ vidUpdateRate = 5;     % Default frame rate to display live video (FPS).
 
 %lineProfYMax = 15000;  % Default max y axis for line profile
 
+% DAQ Settings
+useDaq = false; %Default
+sampleRate=16000;
+
+
 dataSavePrefix = '\data\aiDataSave_';
 
 memsRange = [-1.5, 1.5]; %TODO - enter this through GUI
@@ -98,7 +103,7 @@ memsOptimRange = [-3, 3];
 memsDefaultStepSize = 0.1;  %%%%%%%%%Important%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 memsOptimStepSize = 0.5;
 scanWait=0.05; %Time to wait after MEMS move to send acq command
-scanWait=0.2
+scanWait=0.2;
 
 memsScanRange = memsRange(1):memsDefaultStepSize:memsRange(2); %This is for measurement scans
 memsScanRangeOptim = memsOptimRange(1):memsOptimStepSize:memsOptimRange(2); %This is for optimisation scans
@@ -247,6 +252,14 @@ setappdata(handles.AIGui,'suppressWarnings',false);
 setappdata(handles.AIGui,'nullerMode',nullerMode);
 setappdata(handles.AIGui,'nullerWGs',nullerWGs);
 setappdata(handles.AIGui,'sharedMemKey',sharedMemKey);
+
+setappdata(handles.AIGui,'useDaq',useDaq)
+setappdata(handles.AIGui,'daqS',0)
+setappdata(handles.AIGui,'ch0',0)
+setappdata(handles.AIGui,'ch1',0)
+setappdata(handles.AIGui,'ch2',0)
+setappdata(handles.AIGui,'ch3',0)
+setappdata(handles.AIGui,'sampleRate',sampleRate);
 
 %%%%%%%%%%%%%%%%%%% Set GUI values %%%%%%%%%%%%%%%%%%%
 set(handles.expTimeBox,'string',num2str(expTime))
@@ -971,6 +984,9 @@ disp('Exiting...')
 
 stop(handles.valTimer)
 stop(handles.vidTimer)
+
+daqS=getappdata(handles.AIGui,'daqS');
+delete(daqS)
 
 setappdata(handles.AIGui,'runState',0)
 % Close shutter
@@ -2445,6 +2461,12 @@ function nullerOptBtn_Callback(hObject, eventdata, handles)
 interpAmt = 10; %Interpolated map is nPosns*this
 %scanWait=0.5; %Time to wait after MEMS move to send acq command
 daqChans = [1, 4]; %Channels for each MEMS segment
+daqS = getappdata(handles.AIGui,'daqS');
+acqDuration = str2double(get(handles.scanDurBox,'String'));
+useDaq=getappdata(handles.AIGui,'useDaq');
+if useDaq
+    daqS.DurationInSeconds = acqDuration;
+end
 
 scanWait = str2double(get(handles.nullerScanwaitBox,'String'));
 segNums = getappdata(handles.AIGui,'segNums');
@@ -2468,6 +2490,11 @@ robj = shmref(sharedMemKey);
 
 %        pause(1) %%%%TESTING
 
+nLoops = str2double(get(handles.numScanLoopsBox,'String'));
+allPhotomValuesOld = allPhotomValues;
+
+for loop = 1:nLoops
+
 for ss = 1:length(segInds)
     seg = segInds(ss);
     scanStatusString = ['Doing MEMS Scan for Seg ' num2str(seg)];
@@ -2489,8 +2516,14 @@ for ss = 1:length(segInds)
 %             testvec=zeros(5000,1);
 %             for k = 1:5000
                 
-            % Get current flux values from shared memory
-            dataIn=(robj.data);
+            if useDaq
+                % Instead of shared memory, acquire directly
+                dataIn = startForeground(daqS);
+            else
+                % Get current flux values from shared memory
+                dataIn=(robj.data);
+            end
+
             mnData = mean(dataIn,1);
             allPhotomValues(xx,yy,ss)=mnData(daqChans(ss));
                        
@@ -2503,8 +2536,11 @@ for ss = 1:length(segInds)
         disp(['X position ' num2str(xx) ' of ' num2str(nPosns)])
     end
     
+    allPhotomValues = allPhotomValues + allPhotomValuesOld;
+    allPhotomValuesOld = allPhotomValues;
+    
     % Find the max and show the result
-    curVals = allPhotomValues(:,:,ss);
+    curVals = allPhotomValues(:,:,ss)
     
     disp('Interpolating MEMS Scan');
     interpStep = (max(memsScanRange) - min(memsScanRange)) / (nPosns * interpAmt);
@@ -2547,7 +2583,7 @@ for ss = 1:length(segInds)
     hold(handles.axesMemsScan,'off');   
     
     allBestMemsPosns(:,ss) = [maxPosX, maxPosY]
-    
+
     %Set the current MEMS position to the best one
     PTTCurrentPosition = getappdata(handles.AIGui,'PTTCurrentPosition');
     PTTCurrentPosition(seg,2)=maxPosX;
@@ -2558,8 +2594,9 @@ for ss = 1:length(segInds)
     setappdata(handles.AIGui,'PTTCurrentPosition',PTTCurrentPosition);
 %    [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
 %    set(handles.memsPosnTable,'Data',ReachablePositions);
-
 end
+end
+
 set(handles.scanStatusText,'Visible','Off');
 delete(robj);
 disp('Finished')
@@ -2596,7 +2633,15 @@ function nullerDepth1DBtn_Callback(hObject, eventdata, handles)
 
 %scanWait=0.5; %Time to wait after MEMS move to send acq command
 daqChans = [1, 4]; %Channels for each MEMS segment
+nullChan = 2;
 memsScanRange=-0.5:0.02:0.5;
+memsScanRange=-2.5:0.05:2.5
+daqS = getappdata(handles.AIGui,'daqS');
+acqDuration = str2double(get(handles.scanDurBox,'String'));
+useDaq=getappdata(handles.AIGui,'useDaq');
+if useDaq
+    daqS.DurationInSeconds = acqDuration;
+end
 
 scanWait = str2double(get(handles.nullerScanwaitBox,'String'));
 segNums = getappdata(handles.AIGui,'segNums');
@@ -2618,7 +2663,10 @@ allBestMemsPosns=zeros(1,1);
 
 robj = shmref(sharedMemKey);
 
+nLoops = str2double(get(handles.numScanLoopsBox,'String'));
+allPhotomValuesOld = allPhotomValues;
 
+for loop = 1:nLoops
 
     seg = segInds(str2double(get(handles.nullerOffsetSeg,'String')));
     scanStatusString = ['Doing Piston Scan for Seg ' num2str(seg)];
@@ -2638,10 +2686,19 @@ robj = shmref(sharedMemKey);
 %             testvec=zeros(5000,1);
 %             for k = 1:5000
                 
-            % Get current flux values from shared memory
-            dataIn=(robj.data);
+
+            
+            if useDaq
+                % Instead of shared memory, acquire directly
+                dataIn = startForeground(daqS);
+            else
+                % Get current flux values from shared memory
+                dataIn=(robj.data);
+            end
+            
             mnData = mean(dataIn,1);
-            allPhotomValues(pp)=mnData(2);
+            allPhotomValues(pp)=mnData(nullChan);
+            
                        
 %                 testvec(k) = mnData(1);
 %                 while toc < 0.001
@@ -2652,14 +2709,18 @@ robj = shmref(sharedMemKey);
         %disp(['X position ' num2str(xx) ' of ' num2str(nPosns)])
     end
     
+    allPhotomValues = allPhotomValues + allPhotomValuesOld;
+    allPhotomValuesOld = allPhotomValues;
+    
     % Find the max and show the result
-    curVals = allPhotomValues;
+    curVals = allPhotomValues/loop;
     
     figure(1)
     plot(memsScanRange,curVals)
     [m, minind] = min(curVals);
     newPistVal = memsScanRange(minind);
     disp(['Minimum at Piston of ' num2str(newPistVal)])
+    disp(['Null depth: ' num2str(min(curVals)/max(curVals))])
     
 %     disp('Interpolating MEMS Scan');
 %     interpStep = (max(memsScanRange) - min(memsScanRange)) / (nPosns * interpAmt);
@@ -2702,14 +2763,16 @@ robj = shmref(sharedMemKey);
 %     hold(handles.axesMemsScan,'off');   
     
 %    allBestMemsPosns(:,ss) = [maxPosX, maxPosY]
-    
-    %Set the current MEMS position to the best one
-    PTTPosition = PTTPositionOn; %getappdata(handles.AIGui,'PTTCurrentPosition');
-    PTTPosition(seg,1)=newPistVal;
-    SetMirrorPosition(memsHandle, memsSegsList, PTTPosition);
-    MirrorSendSettings(memsHandle);
-    set(handles.memsPosnTable,'Data',PTTPosition);
-    setappdata(handles.AIGui,'PTTCurrentPosition',PTTPosition);
+end
+
+
+%Set the current MEMS position to the best one
+PTTPosition = PTTPositionOn; %getappdata(handles.AIGui,'PTTCurrentPosition');
+PTTPosition(seg,1)=newPistVal;
+SetMirrorPosition(memsHandle, memsSegsList, PTTPosition);
+MirrorSendSettings(memsHandle);
+set(handles.memsPosnTable,'Data',PTTPosition);
+setappdata(handles.AIGui,'PTTCurrentPosition',PTTPosition);
 %    [ReachablePositions LockedFlag ReachableFlag] = GetMirrorPosition(memsHandle, memsSegsList);
 %    set(handles.memsPosnTable,'Data',ReachablePositions);
 
@@ -2749,3 +2812,96 @@ function nullerDepth3DBtn_Callback(hObject, eventdata, handles)
 % hObject    handle to nullerDepth3DBtn (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
+
+
+% --- Executes on button press in daqSessionBtn.
+function daqSessionBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to daqSessionBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+set(handles.daqSessionBtn,'ForegroundColor',[1 0 0])
+sampleRate = getappdata(handles.AIGui,'sampleRate');
+daqS = daq.createSession('ni');
+ch0 = addAnalogInputChannel(daqS, 'Dev1', 0, 'Voltage');
+ch1 = addAnalogInputChannel(daqS, 'Dev1', 1, 'Voltage');
+ch2 = addAnalogInputChannel(daqS, 'Dev1', 2, 'Voltage');
+ch3 = addAnalogInputChannel(daqS, 'Dev1', 3, 'Voltage');
+daqS.Rate=sampleRate;
+
+setappdata(handles.AIGui,'daqS',daqS)
+setappdata(handles.AIGui,'ch0',ch0)
+setappdata(handles.AIGui,'ch1',ch1)
+setappdata(handles.AIGui,'ch2',ch2)
+setappdata(handles.AIGui,'ch3',ch3)
+
+setappdata(handles.AIGui,'useDaq',true)
+
+%pause
+%data = startForeground(daqS);
+%avData=mean(data,1)
+%disp('Done')
+
+setappdata(handles.AIGui,'daqS',daqS);
+
+
+
+
+
+
+
+% --- Executes on button press in releaseDaqBtn.
+function releaseDaqBtn_Callback(hObject, eventdata, handles)
+% hObject    handle to releaseDaqBtn (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+daqS=getappdata(handles.AIGui,'daqS');
+delete(daqS)
+setappdata(handles.AIGui,'useDaq',false)
+set(handles.daqSessionBtn,'ForegroundColor',[0 0 0])
+
+
+
+function scanDurBox_Callback(hObject, eventdata, handles)
+% hObject    handle to scanDurBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of scanDurBox as text
+%        str2double(get(hObject,'String')) returns contents of scanDurBox as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function scanDurBox_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to scanDurBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+
+function numScanLoopsBox_Callback(hObject, eventdata, handles)
+% hObject    handle to numScanLoopsBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of numScanLoopsBox as text
+%        str2double(get(hObject,'String')) returns contents of numScanLoopsBox as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function numScanLoopsBox_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to numScanLoopsBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
