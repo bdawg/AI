@@ -22,7 +22,7 @@ function varargout = AIGui(varargin)
 
 % Edit the above text to modify the response to help AIGui
 
-% Last Modified by GUIDE v2.5 01-Mar-2016 17:36:36
+% Last Modified by GUIDE v2.5 17-Mar-2016 19:04:14
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -2493,6 +2493,8 @@ robj = shmref(sharedMemKey);
 nLoops = str2double(get(handles.numScanLoopsBox,'String'));
 allPhotomValuesOld = allPhotomValues;
 
+bgSubt = str2double(get(handles.bgSubtBox,'String'));
+
 for loop = 1:nLoops
 
 for ss = 1:length(segInds)
@@ -2525,6 +2527,7 @@ for ss = 1:length(segInds)
             end
 
             mnData = mean(dataIn,1);
+            mnData = mnData - bgSubt;
             allPhotomValues(xx,yy,ss)=mnData(daqChans(ss));
                        
 %                 testvec(k) = mnData(1);
@@ -2634,8 +2637,11 @@ function nullerDepth1DBtn_Callback(hObject, eventdata, handles)
 %scanWait=0.5; %Time to wait after MEMS move to send acq command
 daqChans = [1, 4]; %Channels for each MEMS segment
 nullChan = 2;
-memsScanRange=-0.5:0.02:0.5;
-memsScanRange=-2.5:0.05:2.5
+
+%memsScanRange=-0.5:0.02:0.5;
+%memsScanRange=-2.5:0.05:2.5
+memsScanRange=1:0.05:2
+
 daqS = getappdata(handles.AIGui,'daqS');
 acqDuration = str2double(get(handles.scanDurBox,'String'));
 useDaq=getappdata(handles.AIGui,'useDaq');
@@ -2829,6 +2835,24 @@ ch2 = addAnalogInputChannel(daqS, 'Dev1', 2, 'Voltage');
 ch3 = addAnalogInputChannel(daqS, 'Dev1', 3, 'Voltage');
 daqS.Rate=sampleRate;
 
+% disp('Using 0.2V range!')
+% ch0.Range=[-0.2,+0.2];
+% ch1.Range=[-0.2,+0.2];
+% ch2.Range=[-0.2,+0.2];
+% ch3.Range=[-0.2,+0.2];
+
+% disp('Using 1.0V range!')
+% ch0.Range=[-1.0,+1.0];
+% ch1.Range=[-1.0,+1.0];
+% ch2.Range=[-1.0,+1.0];
+% ch3.Range=[-1.0,+1.0];
+
+disp('Using 10V range!')
+ch0.Range=[-10,+10];
+ch1.Range=[-10,+10];
+ch2.Range=[-10,+10];
+ch3.Range=[-10,+10];
+
 setappdata(handles.AIGui,'daqS',daqS)
 setappdata(handles.AIGui,'ch0',ch0)
 setappdata(handles.AIGui,'ch1',ch1)
@@ -2897,6 +2921,29 @@ function numScanLoopsBox_Callback(hObject, eventdata, handles)
 % --- Executes during object creation, after setting all properties.
 function numScanLoopsBox_CreateFcn(hObject, eventdata, handles)
 % hObject    handle to numScanLoopsBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+
+function bgSubtBox_Callback(hObject, eventdata, handles)
+% hObject    handle to bgSubtBox (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of bgSubtBox as text
+%        str2double(get(hObject,'String')) returns contents of bgSubtBox as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function bgSubtBox_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to bgSubtBox (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    empty - handles not created until after all CreateFcns called
 
